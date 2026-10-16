@@ -37,12 +37,12 @@ table.t th{width:auto;text-align:center}table.t td{text-align:center}
 </style></head><body>
 <div class="wrap">
 <div>
-<div class="panel"><h1>휴항 증명 서류 작성</h1><div class="mut">E-Ticket 이미지를 올리면 휴항 사유·여객 변경사항을 담은 확인서를 만들어 PDF로 내려받습니다.</div></div>
+<div class="panel"><h1>여객 휴항 증명서류 작성</h1><div class="mut">E-Ticket 이미지를 올리면 휴항 사유·여객 변경사항을 담은 확인서를 만들어 PDF로 내려받습니다.</div></div>
 
-<div class="panel"><h2>① E-Ticket 업로드</h2>
-<input type="file" id="file" accept="image/*">
-<button id="ext" style="margin-top:8px" disabled>이미지에서 자동 입력</button>
-<div id="st">이미지를 선택하면 활성화됩니다. 자동 입력 후 값은 모두 수정 가능합니다.</div></div>
+<div class="panel"><h2>① E-Ticket 업로드 (PDF 권장)</h2>
+<input type="file" id="file" accept="application/pdf,image/*">
+<button id="ext" class="sec" disabled>이미지(JPG)에서 AI 자동 입력 · claude.ai 전용</button>
+<div id="st">E-Ticket PDF를 올리면 바로 자동 입력됩니다. 입력된 값은 모두 수정 가능합니다.</div></div>
 
 <div class="panel"><h2>② 처리 유형</h2><div class="modes">
 <label><input type="radio" name="mode" value="date" checked>날짜 변경</label>
@@ -84,6 +84,7 @@ table.t th{width:auto;text-align:center}table.t td{text-align:center}
 <div class="stage" id="stage"><div class="pages" id="pages"></div></div>
 </div>
 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script>
@@ -129,7 +130,23 @@ document.addEventListener('change',render);
 function fit(){const w=$('stage').clientWidth-24;$('pages').style.setProperty('--z',Math.min(1,w/794))}
 addEventListener('resize',fit);
 function enhance(src){return new Promise(res=>{const im=new Image();im.onload=()=>{try{const k=3,w=im.width*k,h=im.height*k,c=document.createElement('canvas');c.width=w;c.height=h;const x=c.getContext('2d');x.imageSmoothingEnabled=true;x.imageSmoothingQuality='high';x.drawImage(im,0,0,w,h);const id=x.getImageData(0,0,w,h),s=id.data,o=new Uint8ClampedArray(s),a=0.75;for(let y=1;y<h-1;y++)for(let i=1;i<w-1;i++){const p=(y*w+i)*4;for(let ch=0;ch<3;ch++){const q=p+ch,z=5*o[q]-o[q-4]-o[q+4]-o[q-w*4]-o[q+w*4];s[q]=o[q]+a*(z-o[q])}}x.putImageData(id,0,0);res(c.toDataURL('image/jpeg',.95))}catch(e){res(src)}};im.onerror=()=>res(src);im.src=src})}
-$('file').onchange=e=>{fileObj=e.target.files[0];if(!fileObj)return;const r=new FileReader();r.onload=async()=>{$('st').textContent='이미지 선명화 중...';ticketImg=await enhance(r.result);$('ext').disabled=false;$('st').textContent='업로드 완료. "자동 입력"을 눌러주세요.';render()};r.readAsDataURL(fileObj)};
+async function handlePdf(f){const st=$('st');$('ext').disabled=true;st.textContent='PDF 읽는 중...';
+try{if(!window.pdfjsLib)throw new Error('PDF 라이브러리를 불러오지 못했습니다');pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+const doc=await pdfjsLib.getDocument({data:await f.arrayBuffer()}).promise;let txt='';
+for(let i=1;i<=doc.numPages;i++){const c=await(await doc.getPage(i)).getTextContent();txt+=c.items.map(x=>x.str).join(' ')+' '}
+txt=txt.replace(/\s+/g,' ');
+const pg=await doc.getPage(1),vp=pg.getViewport({scale:3}),cv=document.createElement('canvas');cv.width=vp.width;cv.height=vp.height;await pg.render({canvasContext:cv.getContext('2d'),viewport:vp}).promise;ticketImg=cv.toDataURL('image/jpeg',.95);
+if(txt.length<30){st.textContent='PDF에 글자 정보가 없습니다(스캔본). 직접 입력해 주세요.';render();return}
+const g=(r)=>{const m=txt.match(r);return m?m[1].trim():''},set=(id,x)=>{if(x)$(id).value=x};
+const legs=[...txt.matchAll(/출발\s*From\s*(\S+)\s+\S+\s+(\d{4}-\d{2}-\d{2})\D{0,8}?도착\s*To\s*(\S+)\s+\S+\s+(\d{4}-\d{2}-\d{2})/g)],voy=[...txt.matchAll(/Voyage No\.?\s*(\w+)/g)].map(m=>m[1]),cls=[...txt.matchAll(/Class\s+([A-Za-z]+)/g)].map(m=>m[1]);
+set('name',g(/Passenger Name\s+([A-Z]+(?: [A-Z]+)*)(?=\s*[가-힣(]|\s+Ticket|\s*$)/));set('tno',g(/Ticket No\.?\s*([A-Z0-9]+)/));set('issue',g(/Issue Date\s*(\d{4}-\d{2}-\d{2})/));set('vessel',g(/선명\s*(?:Vessel\s*)?([A-Za-z]+(?: [A-Za-z]+)*)/));set('cls',cls[0]);
+set('fare',g(/\bFare\s+KRW\s*([\d,]+)/));set('fuel',g(/Fuel Surcharge\s+KRW\s*([\d,]+)/));set('tax',g(/Taxes[^K]*KRW\s*([\d,]+)/));set('total',g(/Total Amount\s+KRW\s*([\d,]+)/));
+const L=[['out',legs[0]],['ret',legs[1]]];L.forEach(([p,a],i)=>{if(!a)return;set(p+'_rt',a[1]+' → '+a[3]);set(p+'_dep',a[2]);set(p+'_arr',a[4]);set(p+'_voy',voy[i])});
+if(legs.length)$('trip').value=legs.length>1?'rt':'ow';
+const miss=[['성명','name'],['티켓번호','tno'],['가는편 날짜','out_dep']].filter(x=>!v(x[1])).map(x=>x[0]);
+st.textContent=miss.length?'일부 항목을 읽지 못했습니다: '+miss.join(', ')+' - 직접 입력해 주세요.':'PDF 자동 입력 완료. 값이 맞는지 확인하세요.';render()}
+catch(e){st.textContent='PDF 읽기 실패: '+(e.message||e)+' - 직접 입력해 주세요.'}}
+$('file').onchange=e=>{fileObj=e.target.files[0];if(!fileObj)return;if(fileObj.type==='application/pdf'||/\.pdf$/i.test(fileObj.name))return handlePdf(fileObj);const r=new FileReader();r.onload=async()=>{$('st').textContent='이미지 선명화 중...';ticketImg=await enhance(r.result);$('ext').disabled=false;$('st').textContent='업로드 완료. "자동 입력"을 눌러주세요.';render()};r.readAsDataURL(fileObj)};
 $('ext').onclick=async()=>{
  const st=$('st');st.textContent='Claude가 이미지를 읽는 중...';$('ext').disabled=true;
  try{const sample=typeof claude!=='undefined'?await claude.use('sample'):null;if(!sample){st.textContent='자동 입력을 사용할 수 없습니다. 직접 입력해 주세요.';return}
